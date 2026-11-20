@@ -11,4 +11,5 @@ def assess(s,d):
  lock(s);g=garment(s,d['garment_id']);get(s,FitProfile,d['profile_id'])
  if not any(x.garment_id==g.id for x in rows(s,Measurement)):fail('未实测服饰不得推荐尺码')
  if g.state not in ['listed','held']:fail('服饰不在可试穿状态')
+ if any(b.garment_id==g.id and b.profile_id==d['profile_id'] and b.state in ['open','claimed'] for b in rows(s,BlindReview)):fail('该组合的预测已封存在未交卷的盲评单，交卷前不公开')
  x=FitAssessment(**d);s.add(x);s.flush();return x

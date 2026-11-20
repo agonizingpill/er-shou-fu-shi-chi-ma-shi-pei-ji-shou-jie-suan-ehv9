@@ -1,18 +1,35 @@
 import os,redis
 from fastapi import APIRouter,Depends,HTTPException
+from sqlalchemy import select
 from .database import Session
 from .models import *
 from .schemas import *
 from .common import *
 from .security import current,allow
-from . import consignment_service as consignment,fit_service as fit,fitting_service as fitting,sale_service as sale,return_service as returns,settlement_service as settlement
+from . import consignment_service as consignment,fit_service as fit,fitting_service as fitting,sale_service as sale,return_service as returns,settlement_service as settlement,blind_service as blind
 router=APIRouter()
 def change(u,action,fn,supervisor=False):
  allow(u,*(['supervisor'] if supervisor else ['operator','supervisor']))
  with Session() as s:x=fn(s);audit(s,u,action,x);s.commit();return dump(x)
+def enqueue(id,error):
+ try:redis.from_url(os.environ['REDIS_URL'],socket_connect_timeout=1,socket_timeout=2).rpush('resale:fit',id)
+ except Exception:
+  with Session() as s:
+   x=s.get(FitAssessment,id);x.state='failed';x.error=error
+   b=s.scalars(select(BlindReview).where(BlindReview.assessment_id==id)).first()
+   if b:b.state='failed';b.error=error
+   s.commit()
+  raise HTTPException(503,error)
 @router.get('/register')
 def register(u=Depends(current)):
- with Session() as s:return {n:[dump(x) for x in rows(s,c)] for n,c in [('consignors',Consignor),('agreements',Agreement),('amendments',Amendment),('garments',Garment),('measurements',Measurement),('profiles',FitProfile),('assessments',FitAssessment),('fittings',Fitting),('sales',Sale),('returns',Return),('payouts',Payout),('withdrawals',Withdrawal),('clock',Shop)]}
+ with Session() as s:
+  blind_models=rows(s,BlindReview)
+  sealed={b.assessment_id for b in blind_models if b.state in ['open','claimed']}
+  ready={a.id for a in rows(s,FitAssessment) if a.state=='ready'}
+  data={n:[dump(x) for x in rows(s,c)] for n,c in [('consignors',Consignor),('agreements',Agreement),('amendments',Amendment),('garments',Garment),('measurements',Measurement),('profiles',FitProfile),('assessments',FitAssessment),('blinds',BlindReview),('fittings',Fitting),('sales',Sale),('returns',Return),('payouts',Payout),('withdrawals',Withdrawal),('clock',Shop)]}
+  for b in data['blinds']:b['prediction_ready']=b['assessment_id'] in ready
+  data['assessments']=[a for a in data['assessments'] if a['id'] not in sealed]
+  return data
 @router.get('/audit')
 def audits(u=Depends(current)):
  with Session() as s:return [dump(x) for x in rows(s,Audit)]
@@ -31,11 +48,17 @@ def profiles(d:ProfileIn,u=Depends(current)):return change(u,'匿名体型',lamb
 @router.post('/assessments')
 def assessments(d:AssessmentIn,u=Depends(current)):
  d=change(u,'适配计算',lambda s:fit.assess(s,d.model_dump()))
- try:redis.from_url(os.environ['REDIS_URL'],socket_connect_timeout=1,socket_timeout=2).rpush('resale:fit',d['id'])
- except Exception:
-  with Session() as s:x=s.get(FitAssessment,d['id']);x.state='failed';x.error='适配队列不可达，请重试';s.commit()
-  raise HTTPException(503,'适配队列暂时不可达，记录已标记失败，可重新提交')
+ enqueue(d['id'],'适配队列暂时不可达，记录已标记失败，可重新提交')
  return d
+@router.post('/blind-reviews')
+def blind_open(d:BlindReviewIn,u=Depends(current)):
+ x=change(u,'盲评开单',lambda s:blind.open_ticket(s,d.model_dump(),u),True)
+ enqueue(x['assessment_id'],'盲评预测入队失败，盲评单已失效，可重新开单')
+ return x
+@router.post('/blind-reviews/{id}/claim')
+def blind_claim(id:int,u=Depends(current)):return change(u,'盲评领取',lambda s:blind.claim(s,id,u))
+@router.post('/blind-reviews/{id}/submit')
+def blind_submit(id:int,d:BlindSubmitIn,u=Depends(current)):return change(u,'盲评交卷',lambda s:blind.submit(s,id,d.model_dump(),u))
 @router.post('/fittings')
 def fittings(d:FittingIn,u=Depends(current)):return change(u,'排他留衣',lambda s:fitting.reserve(s,d.model_dump()))
 @router.post('/fittings/{id}/cancel')

@@ -17,6 +17,10 @@ class ProfileIn(Input):
  code:str=Field(min_length=2,max_length=40);chest:float=Field(ge=40,le=180);shoulder:float=Field(ge=20,le=80)
 class AssessmentIn(Input):
  garment_id:int;profile_id:int
+class BlindReviewIn(Input):
+ garment_id:int;profile_id:int;note:str=Field(default='',max_length=500)
+class BlindSubmitIn(Input):
+ label:Literal['合身','偏紧','偏松'];note:str=Field(default='',max_length=500)
 class FittingIn(Input):
  garment_id:int;profile_id:int;slot:int=Field(ge=1,le=2);starts:str;ends:str
 class SaleIn(Input):

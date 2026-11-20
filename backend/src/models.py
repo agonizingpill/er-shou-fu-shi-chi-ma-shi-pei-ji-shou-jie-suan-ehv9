@@ -28,6 +28,10 @@ class FitProfile(Base):
 class FitAssessment(Base):
  __tablename__='assessments'
  id=Column(Integer,primary_key=True);garment_id=Column(Integer,ForeignKey('garments.id'),nullable=False);profile_id=Column(Integer,ForeignKey('profiles.id'),nullable=False);state=Column(String(20),default='queued');result=Column(JSON,nullable=True);error=Column(String(500),default='')
+class BlindReview(Base):
+ __tablename__='blind_reviews'
+ id=Column(Integer,primary_key=True);garment_id=Column(Integer,ForeignKey('garments.id'),nullable=False);profile_id=Column(Integer,ForeignKey('profiles.id'),nullable=False);assessment_id=Column(Integer,ForeignKey('assessments.id'),nullable=False);state=Column(String(20),default='open',nullable=False);claimant=Column(String(160),default='',nullable=False);opened_by=Column(String(160),nullable=False);label=Column(String(20),default='',nullable=False);note=Column(String(500),default='',nullable=False);error=Column(String(500),default='',nullable=False);submitted_at=Column(String(32),default='',nullable=False)
+ __table_args__=(CheckConstraint("state IN ('open','claimed','submitted','failed')"),)
 class Fitting(Base):
  __tablename__='fittings'
  id=Column(Integer,primary_key=True);garment_id=Column(Integer,ForeignKey('garments.id'),nullable=False);profile_id=Column(Integer,ForeignKey('profiles.id'),nullable=False);slot=Column(Integer,nullable=False);starts=Column(String(32),nullable=False);ends=Column(String(32),nullable=False);state=Column(String(20),default='reserved',nullable=False)
